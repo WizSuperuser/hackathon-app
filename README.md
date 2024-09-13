@@ -10,6 +10,11 @@ Then install the dependencies:
 poetry install
 ```
 
+Activate poetry environment:
+```bash
+poetry shell
+```
+
 Add the .env file.
 
 Then run the streamlit app:
