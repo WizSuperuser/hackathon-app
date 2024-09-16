@@ -30,5 +30,5 @@ gcloud auth application-default login
 ```
 
 Roadmap:
-- [ ] Add safety
+- [x] Add safety
 - [ ] Improve solver
