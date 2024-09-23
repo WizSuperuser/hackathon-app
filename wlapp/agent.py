@@ -11,6 +11,8 @@ from langchain_core.messages import trim_messages
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
+import vertexai
+from langchain_google_vertexai import VertexAIEmbeddings, ChatVertexAI
 
 load_dotenv()
 
@@ -43,12 +45,25 @@ Based on the solution to the question, use the socratic method to guide the stud
 Do no answer the question, but provide hints or prompt the student to think of the next step.
 """
 
+
+
+def get_vertex_embeddings():
+    vertexai.init(
+        project=os.environ.get("VERTEX_PROJECT_ID"),
+        location=os.environ.get("VERTEX_PROJECT_LOCATION")
+        )
+
+    # Initialize the a specific Embeddings Model version
+    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
+    
+    return embeddings
+
 def get_vector_retriever():
     QDRANT_URL=os.environ.get("QDRANT_URL")
     QDRANT_API_KEY=os.environ.get("QDRANT_API_KEY")
     vectorstore = QdrantVectorStore.from_existing_collection(
-        collection_name="dsa-1",
-        embedding=OpenAIEmbeddings(),
+        collection_name="dsa_notes",
+        embedding=get_vertex_embeddings(),
         url=QDRANT_URL,
         api_key=QDRANT_API_KEY,
     )
@@ -59,7 +74,12 @@ async def stream_openai(query_text:str):
     
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     prompt_socratic = ChatPromptTemplate.from_template(SOCRATIC_PROMPT_TEMPLATE)
-    model = ChatOpenAI(temperature=0, streaming=True)
+    llm = ChatOpenAI(temperature=0, streaming=True)
+    model = ChatVertexAI(
+        model_name="gemini-1.5-flash-001", 
+        location=os.environ.get("VERTEX_PROJECT_LOCATION"), 
+        project=os.environ.get("VERTEX_PROJECT_ID")
+        )
     retriever = get_vector_retriever()
     history = ChatMessageHistory()
     
@@ -85,6 +105,9 @@ async def stream_openai(query_text:str):
         | StrOutputParser()
     )
     
+    
+    
+    config = {"configurable": {"thread_id": "1"}} 
     async for chunk in socratic_chain.astream(query_text):
         yield f"{chunk}"
         

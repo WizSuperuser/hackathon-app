@@ -1,11 +1,13 @@
 import os
 import asyncio
 from typing import Literal, AsyncGenerator
+import uuid
 
 from pydantic import BaseModel, Field
 import streamlit as st
 
 from agent import stream_openai
+from graph import stream_graph
 
 IS_USING_IMAGE_RUNTIME = bool(os.environ.get("IS_USING_IMAGE_RUNTIME", False))
 APP_TITLE = "WizlearnrAI"
@@ -19,6 +21,8 @@ class ChatMessage(BaseModel):
     
 async def main():
     st.set_page_config(page_title=APP_TITLE)
+    if "thread_id" not in st.session_state:
+        st.session_state.thread_id = uuid.uuid4()
     
     await asyncio.sleep(5)
     
@@ -41,7 +45,7 @@ async def main():
         chat_history.append(ChatMessage(type="human", content=query_text))
         st.chat_message("human").write(query_text)
         # draw ai response to screen
-        await draw_message(stream_openai(query_text))
+        await draw_message(stream_graph(query_text, st.session_state.thread_id))
         
         st.rerun()
 

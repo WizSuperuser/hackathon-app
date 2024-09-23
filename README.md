@@ -31,4 +31,6 @@ gcloud auth application-default login
 
 Roadmap:
 - [x] Add safety
+- [ ] Add session history
 - [ ] Improve solver
+- [ ] Add response actions: rate, copy, regenerate

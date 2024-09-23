@@ -19,6 +19,7 @@ pydantic = "^2.9.1"
 langchain-groq = "^0.1.9"
 langchain-experimental = "^0.0.65"
 langchain-google-vertexai = "^1.0.10"
+vertexai = "^1.67.0"
 
 
 [build-system]
