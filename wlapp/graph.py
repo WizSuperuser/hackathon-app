@@ -3,9 +3,10 @@ import asyncio
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_google_vertexai import VertexAIEmbeddings
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage, AIMessage
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.errors import NodeInterrupt
 import vertexai
 
 load_dotenv()
@@ -56,15 +57,17 @@ def simple_solver(state: State):
     return {"context": response.content}
 
 
-socratic_prompt = """You are a tutor trying to help a student learn a concept. 
+socratic_prompt = """You are a tutor trying to help a student gain a very strong understanding of a concept/problem. 
 
 You are helping them with a problem and want to help them understand the concepts by figuring out the solution themselves with only nudges in the right direction.
 
 You have the solution above but the student has never seen it.
 
-Based on the solution to the question, use the socratic method to guide the student towards the answer.
+If the student wants to learn about a new concept: use the solution to provide the necessary context. Then, based on that ask the student a question that requires them to apply the concept in code to help enhance their understanding.
 
-Do no answer the question, but provide hints or prompt the student to think of the next step."""
+If the question is a problem to solve: based on the solution to the question, use the socratic method to guide the student towards the answer.
+
+Provide hints or prompt the student to think of the next step. If the student seems to be really stuggling with a concept, provide a larger hint. Always take a code-first approach when explaining, giving examples, or solving a problem."""
 
 def socratic(state: State):
     messages = [SystemMessage(content=state["context"] + socratic_prompt)]
@@ -103,10 +106,12 @@ def should_summarize(state: State):
         return "summarize"
     return END
 
+
 workflow = StateGraph(State)
 workflow.add_node("solver", simple_solver)
 workflow.add_node("socratic", socratic)
 workflow.add_node("summarize", summarize_conversation)
+
 
 workflow.add_edge(START, "solver")
 workflow.add_edge("solver", "socratic")
@@ -123,7 +128,8 @@ async def stream_graph(message, thread_id):
         if event["event"] == "on_chat_model_stream" and event['metadata'].get('langgraph_node','') == "socratic":
             data = event["data"]
             yield data["chunk"].content
-            
+        elif event["event"] == "on_chat_model_end" and event['metadata'].get('langgraph_node','') == "solver":
+            yield event   
 
 
 async def text_stream(query_text, thread_id):

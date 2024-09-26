@@ -21,6 +21,14 @@ class ChatMessage(BaseModel):
     
 async def main():
     st.set_page_config(page_title=APP_TITLE)
+    with st.sidebar:
+        st.header(f"{APP_TITLE}")
+        "Learn Data Structures and Algorithms using the Socratic method."
+        with st.popover(":material/policy: Privacy", use_container_width=True):
+            st.write(
+                "Prompts, responses and feedback in this app are anonymously recorded and saved for product evaluation and improvement purposes only."
+            )
+    
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = uuid.uuid4()
     
