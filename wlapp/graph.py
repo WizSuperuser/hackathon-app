@@ -10,7 +10,7 @@ from langgraph.errors import NodeInterrupt
 import vertexai
 
 load_dotenv()
-llm = ChatGroq(model="llama-3.1-70b-versatile")
+llm = ChatGroq(model="llama-3.2-90b-text-preview")
 vertexai.init(
         project=os.environ.get("VERTEX_PROJECT_ID"),
         location=os.environ.get("VERTEX_PROJECT_LOCATION")
@@ -128,8 +128,7 @@ async def stream_graph(message, thread_id):
         if event["event"] == "on_chat_model_stream" and event['metadata'].get('langgraph_node','') == "socratic":
             data = event["data"]
             yield data["chunk"].content
-        elif event["event"] == "on_chat_model_end" and event['metadata'].get('langgraph_node','') == "solver":
-            yield event   
+        
 
 
 async def text_stream(query_text, thread_id):
