@@ -5,6 +5,7 @@ import uuid
 
 from pydantic import BaseModel, Field
 import streamlit as st
+import streamlit.components.v1 as components
 
 from agent import stream_openai
 from graph import stream_graph
@@ -55,7 +56,24 @@ async def main():
         # draw ai response to screen
         await draw_message(stream_graph(query_text, st.session_state.thread_id))
         
-        st.rerun()
+    if st.session_state.chat_history:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Reload"):
+                st.session_state.chat_history.pop()
+                alternate_response = f"Please respond using an alternate approach to the same question. "
+                await draw_message(stream_graph(alternate_response+st.session_state.chat_history[-1].content, st.session_state.thread_id))
+        with col2:
+            if st.button("Copy Last Response"):
+                last_ai_message = next((msg.content for msg in reversed(st.session_state.chat_history) if msg.type == "ai"), None)
+                if last_ai_message:
+                    st.write("Please use the copy button on the top right of the box below to copy the response!")
+                    st.code(last_ai_message, language="text")
+                else:
+                    st.write("No AI response to copy.")
+            
+    
+        # st.rerun()
 
 async def draw_history(history: AsyncGenerator):
     async for message in history:
@@ -73,6 +91,12 @@ async def draw_message(message: AsyncGenerator):
         async for msg in message:
             streaming_content += msg
             streaming_placeholder.markdown(streaming_content)
+        
+        if not streaming_content:
+            safety_message = "Sorry, I can't answer that."
+            streaming_content = safety_message
+            streaming_placeholder.markdown(safety_message)
+            
         st.session_state.chat_history.append(ChatMessage(type="ai", content=streaming_content))
 
 

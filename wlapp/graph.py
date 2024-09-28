@@ -1,12 +1,16 @@
 import os
 import asyncio
 from dotenv import load_dotenv
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
+from langchain_qdrant import QdrantVectorStore
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.errors import NodeInterrupt
 import vertexai
 
 load_dotenv()
@@ -23,6 +27,7 @@ embeddings = VertexAIEmbeddings(model_name=os.environ.get("VERTEX_MODEL_ID"),
 class State(MessagesState):
     summary: str
     context: str
+    enough_context: bool = False
 
 simple_solver_prompt = """You are helping with solving a student's questions about data structures and algorithms.
 
@@ -107,14 +112,111 @@ def should_summarize(state: State):
     return END
 
 
+# Retriever
+def get_vector_store():
+    QDRANT_URL=os.environ.get("QDRANT_URL")
+    QDRANT_API_KEY=os.environ.get("QDRANT_API_KEY")
+    vectorstore = QdrantVectorStore.from_existing_collection(
+        collection_name="dsa_notes",
+        embedding=embeddings,
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
+    )
+    return vectorstore
+
+vectorstore = get_vector_store()
+notes_retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+def retriever(state: State):
+    additional_context = notes_retriever.invoke(state['context'])
+    return {'context': state['context'] + '-----------------------'.join(x.page_content for x in additional_context)}
+
+# Safety checker
+SAFETY_PROMPT="""
+You are a moderator checking if the student's queries are engaging with the data 
+structures and algorithms material in a healthy and safe manner. Here's the student's 
+most recent query/response:
+
+{query}
+
+Check if the query/response contains harmful content or if it is unrelated to the 
+topic of data structures and algorithms. Give a binary score 'yes' or 'no' for safety.
+Score 'yes' if the query/response is safe and relevant to the topic and 'no' otherwise.
+"""
+
+class CheckSafety(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Is the query safe and relevant to data structures and algorithms? 'yes' or 'no'"
+    )
+    
+llm_safety = llm.with_structured_output(CheckSafety)
+
+prompt_safety = ChatPromptTemplate.from_template(SAFETY_PROMPT)
+
+safety = prompt_safety | llm_safety
+
+def safety_checker(state: State):
+    message = state["messages"][-1]
+    if 'yes' == safety.invoke({"query": message}).binary_score:
+        return "context_check"
+    else:
+        return END
+    
+# Context Checker
+class CheckContext(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Is the context enough to provide a response to the student's query? 'yes' or 'no'"
+    )
+
+llm_router = llm.with_structured_output(CheckContext)
+
+# Prompt
+system_router = """
+You are a reasoning agent checking if the provided context is enough to answer a student's
+query. The query can be a question: if so you must check if the context is enough to
+answer the question. The query can also be a student's attempt at answering or taking the
+next step in answering a question: if so, you must check if the context is enough to
+check the student's response for correctness and be able to guide them towards the right
+path. Give a binary score 'yes' or 'no' to indicate whether the context is enough 
+for the task. If responding to either type of query requires more information or checking new code
+not present in the context, score 'no'.
+"""
+
+prompt_router = ChatPromptTemplate.from_messages(
+    [
+        ('system', system_router),
+        ('human', "Context: \n\n {context} \n\n Student query: {query}"),
+    ]
+)
+
+router = prompt_router | llm_router
+
+def context_check(state: State):
+    if state.get("context", ""):
+        return {"enough_context": 'yes'==router.invoke({'context': state["context"], 'query': state['messages'][-1]})}
+    else:
+        return {"enough_context": False}
+
+def context_router(state: State):
+    if state['enough_context']:
+        return "socratic"
+    else:
+        return "solver"
+
+
 workflow = StateGraph(State)
+workflow.add_node("context_check", context_check)
 workflow.add_node("solver", simple_solver)
+workflow.add_node("retriever", retriever)
 workflow.add_node("socratic", socratic)
 workflow.add_node("summarize", summarize_conversation)
+# workflow.add_node("interrupt", give_answer)
 
-
-workflow.add_edge(START, "solver")
-workflow.add_edge("solver", "socratic")
+workflow.add_conditional_edges(START, safety_checker, {"context_check": "context_check", END: END})
+workflow.add_conditional_edges("context_check", context_router, {"socratic": "socratic", "solver": "solver"})
+workflow.add_edge("solver", "retriever")
+workflow.add_edge("retriever", "socratic")
+# workflow.add_edge("solver", "interrupt")
+# workflow.add_conditional_edges("interrupt", route_to_answer, {"summarize": "summarize", "socratic": "socratic"})
 workflow.add_conditional_edges("socratic", should_summarize, {"summarize": "summarize", END: END})
 workflow.add_edge("summarize", END)
 
