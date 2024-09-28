@@ -28,6 +28,7 @@ class State(MessagesState):
     summary: str
     context: str
     enough_context: bool = False
+    safe: bool = True
 
 simple_solver_prompt = """You are helping with solving a student's questions about data structures and algorithms.
 
@@ -157,6 +158,13 @@ safety = prompt_safety | llm_safety
 def safety_checker(state: State):
     message = state["messages"][-1]
     if 'yes' == safety.invoke({"query": message}).binary_score:
+        return {"safe": True}
+    else:
+        delete_message = [RemoveMessage(id=message.id)]
+        return {"safe": False, "messages": delete_message} 
+    
+def safety_router(state: State):
+    if state["safe"]:
         return "context_check"
     else:
         return END
@@ -204,6 +212,7 @@ def context_router(state: State):
 
 
 workflow = StateGraph(State)
+workflow.add_node("safety", safety_checker)
 workflow.add_node("context_check", context_check)
 workflow.add_node("solver", simple_solver)
 workflow.add_node("retriever", retriever)
@@ -211,7 +220,8 @@ workflow.add_node("socratic", socratic)
 workflow.add_node("summarize", summarize_conversation)
 # workflow.add_node("interrupt", give_answer)
 
-workflow.add_conditional_edges(START, safety_checker, {"context_check": "context_check", END: END})
+workflow.add_edge(START, "safety")
+workflow.add_conditional_edges("safety", safety_router, {"context_check": "context_check", END: END})
 workflow.add_conditional_edges("context_check", context_router, {"socratic": "socratic", "solver": "solver"})
 workflow.add_edge("solver", "retriever")
 workflow.add_edge("retriever", "socratic")
