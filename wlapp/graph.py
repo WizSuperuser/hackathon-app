@@ -12,6 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 import vertexai
+from graphviz import Digraph
 
 load_dotenv()
 llm = ChatGroq(model="llama-3.2-90b-text-preview")
@@ -29,6 +30,7 @@ class State(MessagesState):
     context: str
     enough_context: bool = False
     safe: bool = True
+    graph: Digraph
 
 simple_solver_prompt = """You are helping with solving a student's questions about data structures and algorithms.
 
@@ -162,7 +164,6 @@ class CheckContext(BaseModel):
 
 llm_router = llm.with_structured_output(CheckContext)
 
-# Prompt
 system_router = """
 You are a reasoning agent checking if the provided context is enough to answer a student's
 query. The query can be a question: if so you must check if the context is enough to
@@ -194,6 +195,63 @@ def context_router(state: State):
         return "socratic"
     else:
         return "solver"
+    
+    
+# Graph 
+class Node(BaseModel):
+    id: int
+    label: str
+    color: str
+
+class Edge(BaseModel):
+    source: int
+    target: int
+    label: str
+    color: str = "black"
+    
+class KnowledgeGraph(BaseModel):
+    nodes: list[Node] = Field(..., default_factory=list)
+    edges: list[Edge] = Field(..., default_factory=list)
+    
+    def return_graph(self):
+        dot = Digraph(comment="Knowledge Graph")
+        
+        # Add nodes
+        for node in self.nodes:
+            dot.node(str(node.id), node.label, color=node.color)
+            
+        # Add edges
+        for edge in self.edges:
+            dot.edge(str(edge.source), str(edge.target), label=edge.label, color=edge.color)
+        
+        # Return graph
+        return dot
+    
+    
+llm_graph = llm.with_structured_output(KnowledgeGraph)
+
+graph_prompt = """Create a knowledge to help the student understand the concepts you are discussing and have discussed so far.
+
+Below you have the knowledge graph of the conversation so far. 
+Update or extend it to include the most recent conversation topics.
+
+Below that you have the conversation with the student. 
+Use the recent messages to update and extend the graph based on the topics discussed and the student's understanding."""
+
+def create_graph(state: State):
+    messages = [SystemMessage(content=graph_prompt)]
+    graph = state.get("graph", "")
+    if graph:
+        graph_message = f"Knowledge graph of your conversation with the student: {str(graph)}"
+        messages += [HumanMessage(content=graph_message)]
+    summary = state.get("summary", "")
+    if summary:
+        summary_message = f"Summary of your conversation with the student: {summary}"
+        messages += [HumanMessage(content=summary_message)]
+    messages += state["messages"]
+    
+    response = llm_graph.invoke(messages)
+    return {"graph": response}
 
 
 workflow = StateGraph(State)
@@ -202,6 +260,7 @@ workflow.add_node("context_check", context_check)
 workflow.add_node("solver", simple_solver)
 workflow.add_node("retriever", retriever)
 workflow.add_node("socratic", socratic)
+workflow.add_node("graph_creator", create_graph)
 workflow.add_node("summarize", summarize_conversation)
 # workflow.add_node("interrupt", give_answer)
 
@@ -210,9 +269,10 @@ workflow.add_conditional_edges("safety", safety_router, {"context_check": "conte
 workflow.add_conditional_edges("context_check", context_router, {"socratic": "socratic", "solver": "solver"})
 workflow.add_edge("solver", "retriever")
 workflow.add_edge("retriever", "socratic")
+workflow.add_edge("socratic", "graph_creator")
 # workflow.add_edge("solver", "interrupt")
 # workflow.add_conditional_edges("interrupt", route_to_answer, {"summarize": "summarize", "socratic": "socratic"})
-workflow.add_conditional_edges("socratic", should_summarize, {"summarize": "summarize", END: END})
+workflow.add_conditional_edges("graph_creator", should_summarize, {"summarize": "summarize", END: END})
 workflow.add_edge("summarize", END)
 
 memory = MemorySaver()
@@ -226,7 +286,10 @@ async def stream_graph(message, thread_id):
             data = event["data"]
             yield data["chunk"].content
         
-
+def draw_graph(thread_id):
+    config = {"configurable": {"thread_id": str(thread_id)}} 
+    if knowledge_graph := graph.get_state(config).values.get("graph", ""):
+        return knowledge_graph.return_graph()
 
 async def text_stream(query_text, thread_id):
     async for c in stream_graph(query_text, thread_id):

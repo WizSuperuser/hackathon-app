@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 import streamlit as st
 import streamlit.components.v1 as components
 
-from graph import stream_graph
+from graph import stream_graph, draw_graph
 
 IS_USING_IMAGE_RUNTIME = bool(os.environ.get("IS_USING_IMAGE_RUNTIME", False))
 APP_TITLE = "WizlearnrAI"
@@ -67,6 +67,9 @@ async def main():
         # draw ai response to screen
         await draw_message(stream_graph(query_text, st.session_state.thread_id))
         
+    if knowledge_graph := draw_graph(st.session_state.thread_id):
+        st.graphviz_chart(knowledge_graph)
+    
     if st.session_state.chat_history:
         col1, col2 = st.columns(2)
         with col1:
