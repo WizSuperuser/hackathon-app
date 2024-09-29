@@ -4,6 +4,7 @@ WORKDIR /app
 COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 COPY /wlapp .
+COPY wizlearnr_logo.png .
 
 EXPOSE 8501
 

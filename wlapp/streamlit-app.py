@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 import streamlit as st
 import streamlit.components.v1 as components
 
-from agent import stream_openai
 from graph import stream_graph
 
 IS_USING_IMAGE_RUNTIME = bool(os.environ.get("IS_USING_IMAGE_RUNTIME", False))
@@ -22,13 +21,23 @@ class ChatMessage(BaseModel):
     
 async def main():
     st.set_page_config(page_title=APP_TITLE)
+    st.logo("wizlearnr_logo.png")
     with st.sidebar:
         st.header(f"{APP_TITLE}")
         "Learn Data Structures and Algorithms using the Socratic method."
+        if st.button("Start a New Chat", help="This will delete your current chat!", use_container_width=True):
+            if "chat_history" in st.session_state:
+                del st.session_state["chat_history"]
+            if "thread_id" in st.session_state:
+                del st.session_state["thread_id"]
+            st.rerun()
+
         with st.popover(":material/policy: Privacy", use_container_width=True):
             st.write(
                 "Prompts, responses and feedback in this app are anonymously recorded and saved for product evaluation and improvement purposes only."
             )
+    
+    
     
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = uuid.uuid4()
@@ -49,8 +58,10 @@ async def main():
             yield message
             
     await draw_history(chat_history_iter())
+
     
-    if query_text := st.chat_input("Ask a question!"):
+    query_text = st.chat_input("Learn something new or solve a problem together!")
+    if query_text:
         chat_history.append(ChatMessage(type="human", content=query_text))
         st.chat_message("human").write(query_text)
         # draw ai response to screen
@@ -59,7 +70,7 @@ async def main():
     if st.session_state.chat_history:
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Reload"):
+            if st.button("Regenerate Last Response"):
                 st.session_state.chat_history.pop()
                 alternate_response = f"Please respond using an alternate approach to the same question. "
                 await draw_message(stream_graph(alternate_response+st.session_state.chat_history[-1].content, st.session_state.thread_id))
@@ -71,6 +82,8 @@ async def main():
                     st.code(last_ai_message, language="text")
                 else:
                     st.write("No AI response to copy.")
+        
+        
             
     
         # st.rerun()

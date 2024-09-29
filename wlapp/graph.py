@@ -132,37 +132,22 @@ def retriever(state: State):
     return {'context': state['context'] + '-----------------------'.join(x.page_content for x in additional_context)}
 
 # Safety checker
-SAFETY_PROMPT="""
-You are a moderator checking if the student's queries are engaging with the data 
-structures and algorithms material in a healthy and safe manner. Here's the student's 
-most recent query/response:
+llm_guard = ChatGroq(model="llama-guard-3-8b")
 
-{query}
+guard_prompt = ChatPromptTemplate.from_messages([
+    ("user", "{query}"),
+])
 
-Check if the query/response contains harmful content or if it is unrelated to the 
-topic of data structures and algorithms. Give a binary score 'yes' or 'no' for safety.
-Score 'yes' if the query/response is safe and relevant to the topic and 'no' otherwise.
-"""
-
-class CheckSafety(BaseModel):
-    binary_score: Literal["yes", "no"] = Field(
-        description="Is the query safe and relevant to data structures and algorithms? 'yes' or 'no'"
-    )
-    
-llm_safety = llm.with_structured_output(CheckSafety)
-
-prompt_safety = ChatPromptTemplate.from_template(SAFETY_PROMPT)
-
-safety = prompt_safety | llm_safety
+guard = guard_prompt | llm_guard
 
 def safety_checker(state: State):
     message = state["messages"][-1]
-    if 'yes' == safety.invoke({"query": message}).binary_score:
+    if 'safe' == guard.invoke({"query": message}).content:
         return {"safe": True}
     else:
         delete_message = [RemoveMessage(id=message.id)]
         return {"safe": False, "messages": delete_message} 
-    
+
 def safety_router(state: State):
     if state["safe"]:
         return "context_check"
