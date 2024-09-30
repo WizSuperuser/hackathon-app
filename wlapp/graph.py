@@ -25,12 +25,41 @@ embeddings = VertexAIEmbeddings(model_name=os.environ.get("VERTEX_MODEL_ID"),
                                 project=os.environ.get("VERTEX_PROJECT_ID")
                                 )
 
+class Node(BaseModel):
+    id: int
+    label: str
+    color: str
+
+class Edge(BaseModel):
+    source: int
+    target: int
+    label: str
+    color: str = "black"
+    
+class KnowledgeGraph(BaseModel):
+    nodes: list[Node] = Field(..., default_factory=list)
+    edges: list[Edge] = Field(..., default_factory=list)
+    
+    def return_graph(self):
+        dot = Digraph(comment="Knowledge Graph")
+        
+        # Add nodes
+        for node in self.nodes:
+            dot.node(str(node.id), node.label, color=node.color)
+            
+        # Add edges
+        for edge in self.edges:
+            dot.edge(str(edge.source), str(edge.target), label=edge.label, color=edge.color)
+        
+        # Return graph
+        return dot
+
 class State(MessagesState):
     summary: str
     context: str
     enough_context: bool = False
     safe: bool = True
-    graph: Digraph
+    graph: KnowledgeGraph = KnowledgeGraph()
 
 simple_solver_prompt = """You are helping with solving a student's questions about data structures and algorithms.
 
@@ -198,34 +227,7 @@ def context_router(state: State):
     
     
 # Graph 
-class Node(BaseModel):
-    id: int
-    label: str
-    color: str
 
-class Edge(BaseModel):
-    source: int
-    target: int
-    label: str
-    color: str = "black"
-    
-class KnowledgeGraph(BaseModel):
-    nodes: list[Node] = Field(..., default_factory=list)
-    edges: list[Edge] = Field(..., default_factory=list)
-    
-    def return_graph(self):
-        dot = Digraph(comment="Knowledge Graph")
-        
-        # Add nodes
-        for node in self.nodes:
-            dot.node(str(node.id), node.label, color=node.color)
-            
-        # Add edges
-        for edge in self.edges:
-            dot.edge(str(edge.source), str(edge.target), label=edge.label, color=edge.color)
-        
-        # Return graph
-        return dot
     
     
 llm_graph = llm.with_structured_output(KnowledgeGraph)
