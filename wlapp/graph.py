@@ -3,7 +3,8 @@ import asyncio
 from dotenv import load_dotenv
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from groq import BadRequestError
+from pydantic import BaseModel, Field, ValidationError
 from langchain_groq import ChatGroq
 from langchain_qdrant import QdrantVectorStore
 from langchain_google_vertexai import VertexAIEmbeddings
@@ -13,6 +14,7 @@ from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 import vertexai
 from graphviz import Digraph
+
 
 load_dotenv()
 llm = ChatGroq(model="llama-3.2-90b-text-preview")
@@ -37,8 +39,8 @@ class Edge(BaseModel):
     color: str = "black"
     
 class KnowledgeGraph(BaseModel):
-    nodes: list[Node] = Field(..., default_factory=list)
-    edges: list[Edge] = Field(..., default_factory=list)
+    nodes: list[Node] = Field(..., default_factory=list, description="List of nodes in the graph")
+    edges: list[Edge] = Field(..., default_factory=list, description="List of edges in the graph")
     
     def return_graph(self):
         dot = Digraph(comment="Knowledge Graph")
@@ -59,7 +61,7 @@ class State(MessagesState):
     context: str
     enough_context: bool = False
     safe: bool = True
-    graph: KnowledgeGraph = KnowledgeGraph()
+    graph: KnowledgeGraph
 
 simple_solver_prompt = """You are helping with solving a student's questions about data structures and algorithms.
 
@@ -98,7 +100,7 @@ socratic_prompt = """You are a tutor trying to help a student gain a very strong
 
 You are helping them with a problem and want to help them understand the concepts by figuring out the solution themselves with only nudges in the right direction.
 
-You have the solution above but the student has never seen it.
+You have the solution below but the student has never seen it.
 
 If the student wants to learn about a new concept: use the solution to provide the necessary context. Then, based on that ask the student a question that requires them to apply the concept in code to help enhance their understanding.
 
@@ -107,7 +109,8 @@ If the question is a problem to solve: based on the solution to the question, us
 Provide hints or prompt the student to think of the next step. If the student seems to be really stuggling with a concept, provide a larger hint. Always take a code-first approach when explaining, giving examples, or solving a problem."""
 
 def socratic(state: State):
-    messages = [SystemMessage(content=state["context"] + socratic_prompt)]
+    messages = [SystemMessage(socratic_prompt)]
+    messages += [HumanMessage(content=state["context"])]
     summary = state.get("summary", "")
     if summary:
         summary_message = f"Summary of your conversation with the student: {summary}"
@@ -158,6 +161,7 @@ def get_vector_store():
 
 vectorstore = get_vector_store()
 notes_retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+
 def retriever(state: State):
     additional_context = notes_retriever.invoke(state['context'])
     return {'context': state['context'] + '-----------------------'.join(x.page_content for x in additional_context)}
@@ -232,30 +236,27 @@ def context_router(state: State):
     
 llm_graph = llm.with_structured_output(KnowledgeGraph)
 
-graph_prompt = """Create a knowledge to help the student understand the concepts you are discussing and have discussed so far.
+graph_prompt = """Create a knowledge graph to help the student understand the concepts you are discussing and have discussed so far.
 
-Below you have the knowledge graph of the conversation so far. 
-Extend it to include the most recent conversation topics.
-
-Below that you have the conversation with the student. 
-Use the recent messages to extend the graph based on the topics discussed and the student's understanding.
-Do not extend the graph if there is no change: in this case just return the old graph.
-
-Otherwise: output the complete graph with extensions."""
+Do not call the old graph if it exists, always create a new one."""
 
 def create_graph(state: State):
     messages = [SystemMessage(content=graph_prompt)]
     graph = state.get("graph", "")
     if graph:
-        graph_message = f"Knowledge graph of your conversation with the student: {str(graph)}"
+        graph_message = f"Knowledge graph of your conversation with the student: {str(graph)}\n You can use this graph as a reference but cannot call it!"
         messages += [HumanMessage(content=graph_message)]
     summary = state.get("summary", "")
     if summary:
         summary_message = f"Summary of your conversation with the student: {summary}"
         messages += [HumanMessage(content=summary_message)]
-    messages += state["messages"]
-    
-    response = llm_graph.invoke(messages)
+    messages += [message for message in state["messages"] if type(message)==AIMessage]
+    try:
+        response = llm_graph.invoke(messages)
+    except BadRequestError:
+        response = state.get("graph") if state.get("graph", "") else KnowledgeGraph()
+    except ValidationError:
+        response = state.get("graph") if state.get("graph", "") else KnowledgeGraph() 
     return {"graph": response}
 
 
@@ -295,6 +296,9 @@ def draw_graph(thread_id):
     config = {"configurable": {"thread_id": str(thread_id)}} 
     if knowledge_graph := graph.get_state(config).values.get("graph", ""):
         return knowledge_graph.return_graph()
+            
+    
+        
 
 async def text_stream(query_text, thread_id):
     async for c in stream_graph(query_text, thread_id):
