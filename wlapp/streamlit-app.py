@@ -21,17 +21,35 @@ class ChatMessage(BaseModel):
     
 async def main():
     st.set_page_config(page_title=APP_TITLE)
-    st.logo("wizlearnr_logo.png")
+    st.logo("wizlearnr_circular_logo.png")
+    
     with st.sidebar:
+        
         st.header(f"{APP_TITLE}")
         "Learn Data Structures and Algorithms using the Socratic method."
-        if st.button("Start a New Chat", help="This will delete your current chat!", use_container_width=True):
+        
+        # Sample Questions
+        option = st.selectbox(
+            "Sample questions",
+            (
+                "What is quicksort?",
+                "What are b-trees?",
+            ),
+            index=None,
+            placeholder="What do I ask?",
+            key="questions"
+        )
+        submit = st.button("Chat", type='primary')
+        
+        # Refresh chat
+        if st.button(":material/refresh: Start a New Chat", help="This will delete your current chat!", use_container_width=True):
             if "chat_history" in st.session_state:
                 del st.session_state["chat_history"]
             if "thread_id" in st.session_state:
                 del st.session_state["thread_id"]
             st.rerun()
-
+            
+        # Privacy disclaimer
         with st.popover(":material/policy: Privacy", use_container_width=True):
             st.write(
                 "Prompts, responses and feedback in this app are anonymously recorded and saved for product evaluation and improvement purposes only."
@@ -61,11 +79,14 @@ async def main():
 
     
     query_text = st.chat_input("Learn something new or solve a problem together!")
+    if submit and option:
+        query_text = option
     if query_text:
         chat_history.append(ChatMessage(type="human", content=query_text))
         st.chat_message("human").write(query_text)
         # draw ai response to screen
         await draw_message(stream_graph(query_text, st.session_state.thread_id))
+
         
     if knowledge_graph := draw_graph(st.session_state.thread_id):
         st.graphviz_chart(knowledge_graph)
@@ -73,21 +94,18 @@ async def main():
     if st.session_state.chat_history:
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Regenerate Last Response"):
+            if st.button("Regenerate Last Response", type='primary'):
                 st.session_state.chat_history.pop()
                 alternate_response = f"Please respond using an alternate approach to the same question. "
                 await draw_message(stream_graph(alternate_response+st.session_state.chat_history[-1].content, st.session_state.thread_id))
         with col2:
-            if st.button("Copy Last Response"):
+            if st.button("Copy Last Response", type="primary"):
                 last_ai_message = next((msg.content for msg in reversed(st.session_state.chat_history) if msg.type == "ai"), None)
                 if last_ai_message:
                     st.write("Please use the copy button on the top right of the box below to copy the response!")
                     st.code(last_ai_message, language="text")
                 else:
                     st.write("No AI response to copy.")
-        
-        
-            
     
         # st.rerun()
 

@@ -233,10 +233,13 @@ llm_graph = llm.with_structured_output(KnowledgeGraph)
 graph_prompt = """Create a knowledge to help the student understand the concepts you are discussing and have discussed so far.
 
 Below you have the knowledge graph of the conversation so far. 
-Update or extend it to include the most recent conversation topics.
+Extend it to include the most recent conversation topics.
 
 Below that you have the conversation with the student. 
-Use the recent messages to update and extend the graph based on the topics discussed and the student's understanding."""
+Use the recent messages to extend the graph based on the topics discussed and the student's understanding.
+Do not extend the graph if there is no change: in this case just return the old graph.
+
+Otherwise: output the complete graph with extensions."""
 
 def create_graph(state: State):
     messages = [SystemMessage(content=graph_prompt)]
