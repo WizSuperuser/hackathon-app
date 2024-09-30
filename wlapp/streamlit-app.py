@@ -41,14 +41,48 @@ async def main():
         )
         submit = st.button("Chat", type='primary')
         
-        # Refresh chat
-        if st.button(":material/refresh: Start a New Chat", help="This will delete your current chat!", use_container_width=True):
-            if "chat_history" in st.session_state:
-                del st.session_state["chat_history"]
-            if "thread_id" in st.session_state:
-                del st.session_state["thread_id"]
-            st.rerun()
-            
+        # Open new chat in new tab
+        st.markdown("""
+<a href="https://wlapp-595709402006.asia-south1.run.app" target="_blank">
+<style>
+.custom-button {
+background-color: #2b2c36;
+color: #ffffff;
+padding: 0.35em 0.75em;
+width: 100%;
+margin: 10px 0;
+font-size: 17px;
+font-weight: 500;
+border: 1px solid #54555d;
+border-radius: 0.5rem;
+cursor: pointer;
+transition: border-color 0.2s ease, color 0.2s ease;
+}
+.custom-button:hover {
+    border-color: #FF4B4B;
+    color: #FF4B4B;
+}
+</style>
+<button class="custom-button">
+    Open New Chat
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        <polyline points="15 3 21 3 21 9"></polyline>
+        <line x1="10" y1="14" x2="21" y2="3"></line>
+    </svg>
+</button>
+</a>
+""", 
+            unsafe_allow_html=True)       
+
+        # # Refresh chat
+        # if st.button(":material/refresh: Refresh Chat", help="This will delete your current chat!", use_container_width=True):
+        #     if "chat_history" in st.session_state:
+        #         del st.session_state["chat_history"]
+        #     if "thread_id" in st.session_state:
+        #         del st.session_state["thread_id"]
+        #     st.rerun()
+        
         # Privacy disclaimer
         with st.popover(":material/policy: Privacy", use_container_width=True):
             st.write(
@@ -87,7 +121,7 @@ async def main():
         # draw ai response to screen
         await draw_message(stream_graph(query_text, st.session_state.thread_id))
 
-        
+    # Display graph
     if knowledge_graph := draw_graph(st.session_state.thread_id):
         st.graphviz_chart(knowledge_graph)
     
