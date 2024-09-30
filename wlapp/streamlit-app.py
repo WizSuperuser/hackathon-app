@@ -21,7 +21,7 @@ class ChatMessage(BaseModel):
     
 async def main():
     st.set_page_config(page_title=APP_TITLE)
-    st.logo("wizlearnr_circular_logo.png")
+    st.logo("wizlearnr_logo.png")
     
     with st.sidebar:
         
