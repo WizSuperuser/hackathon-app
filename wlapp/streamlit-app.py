@@ -101,7 +101,7 @@ transition: border-color 0.2s ease, color 0.2s ease;
     chat_history = st.session_state.chat_history
     
     if len(chat_history) == 0:
-        WELCOME = "Hello! I'm an AI-powered learning assistant. I may take a few seconds to boot up when you send your first message. Let's learn some data structures and algorithms!"
+        WELCOME = "Hello! I'm an AI-powered learning assistant. Let's learn some data structures and algorithms!"
         with st.chat_message("ai"):
             st.write(WELCOME)
             
@@ -161,7 +161,7 @@ async def draw_message(message: AsyncGenerator):
             streaming_placeholder.markdown(streaming_content)
         
         if not streaming_content:
-            safety_message = "Sorry, I can't answer that."
+            safety_message = "Sorry, there was a problem."
             streaming_content = safety_message
             streaming_placeholder.markdown(safety_message)
             

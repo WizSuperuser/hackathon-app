@@ -6,20 +6,14 @@ from typing import Literal
 from groq import BadRequestError
 from pydantic import BaseModel, Field, ValidationError
 from langchain_groq import ChatGroq
+from langchain_qdrant import QdrantVectorStore
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.constants import Send
 import vertexai
 from graphviz import Digraph
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_community.document_loaders import WikipediaLoader
-
-
-SUMMARIZE_AFTER_MESSAGES = 8
-KEEP_FIRST_AND_LAST_MESSAGES = 2
 
 load_dotenv()
 llm = ChatGroq(model="llama-3.2-90b-text-preview")
@@ -31,38 +25,6 @@ embeddings = VertexAIEmbeddings(model_name=os.environ.get("VERTEX_MODEL_ID"),
                                 location=os.environ.get("VERTEX_PROJECT_LOCATION"), 
                                 project=os.environ.get("VERTEX_PROJECT_ID")
                                 )
-tavily_search = TavilySearchResults(max_results=2)
-
-
-
-class Node(BaseModel):
-    id: int
-    label: str
-    color: str
-
-class Edge(BaseModel):
-    source: int
-    target: int
-    label: str
-    color: str = "black"
-    
-class KnowledgeGraph(BaseModel):
-    nodes: list[Node] = Field(..., default_factory=list, description="List of nodes in the graph")
-    edges: list[Edge] = Field(..., default_factory=list, description="List of edges in the graph")
-    
-    def return_graph(self):
-        dot = Digraph(comment="Knowledge Graph")
-        
-        # Add nodes
-        for node in self.nodes:
-            dot.node(str(node.id), node.label, color=node.color)
-            
-        # Add edges
-        for edge in self.edges:
-            dot.edge(str(edge.source), str(edge.target), label=edge.label, color=edge.color)
-        
-        # Return graph
-        return dot
 
 class Node(BaseModel):
     id: int
@@ -110,6 +72,8 @@ Do not hallucinate. Do not make up facts. If you don't know how to answer a prob
 
 Be concise."""
 
+#Guide student in a socratic manner to help them figure out the answers on their own as much as possible.
+
 def simple_solver(state: State):
     
     messages = [SystemMessage(content=simple_solver_prompt)]
@@ -117,121 +81,65 @@ def simple_solver(state: State):
     summary = state.get("summary", "")
     # if there is summary, we add it to prompt
     if summary:
-        summary_message = f"\n Above is the original question and response. \n Summary of the conversation that followed: {summary} \n Recent conversation: \n"
-        messages += state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES] + [HumanMessage(content=summary_message)] + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
-    else:
+        # add summary to system message
+        summary_message = f" \n Summary of conversation after above messages: {summary} \n Recent conversation: \n"
+        # append summary to any newer message
+        try: 
+            messages += state["messages"][:10] + [HumanMessage(content=summary_message)] + state["messages"][-10:]
+        except:
+            try:
+                messages += state["messages"]
+            except:
+                messages = state["messages"]
+    try: 
         messages += state["messages"]
+    except:
+        messages = state["messages"]
     response = llm.invoke(messages)
+    # NEED TO PREVENT CONTEXT FROM BALLOONING if I change it to list and want to persist that
 
     return {"context": response.content}
 
-# Search
-class SearchQuery(BaseModel):
-    search_query: str = Field(None, description="Search query for retrieval.")
-    
-# Web Search
-search_instructions = SystemMessage(content=f"""You will be given a conversation between a student and their teacher.
 
-Your goal is to generate a well-structured query for use in retrieval and / or web-search related to the conversation.
-        
-First, analyze the full conversation.
-
-Pay particular attention to the final question posed or answer to be checked submitted by the student.
-
-Convert this final message into a well-structured web search query""")
-
-def search_web(state: State):
-    
-    """ Retrieve docs from web search """
-
-    # Search query
-    search_llm = llm.with_structured_output(SearchQuery)
-    messages = []
-    summary = state.get("summary", "")
-    if summary:
-        summary_message = f"Summary of conversation earlier: {summary}"
-        messages = [HumanMessage(content=summary_message)]
-    messages += state["messages"] 
-    search_query = search_llm.invoke([search_instructions]+messages)
-    
-    # Search
-    search_docs = tavily_search.invoke(search_query.search_query)
-
-     # Format
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document href="{doc["url"]}"/>\n{doc["content"]}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-
-    return {"web_search": formatted_search_docs} 
-
-def search_wikipedia(state: State):
-    
-    """ Retrieve docs from wikipedia """
-
-    # Search query
-    search_llm = llm.with_structured_output(SearchQuery)
-    messages = []
-    summary = state.get("summary", "")
-    if summary:
-        summary_message = f"Summary of conversation earlier: {summary}"
-        messages = [HumanMessage(content=summary_message)]
-    messages += state["messages"] 
-    search_query = search_llm.invoke([search_instructions]+messages)
-    
-    # Search
-    search_docs = WikipediaLoader(query=search_query.search_query, 
-                                  load_max_docs=1).load()
-
-     # Format
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-
-    return {"wiki_search": formatted_search_docs} 
-
-
-socratic_prompt = """You are an empathetic Socratic tutor in conversation to help a student gain a very strong understanding of a concept or solve a problem.
+socratic_prompt = """You are an empathetic tutor in conversation trying to help a student gain a very strong understanding of a concept or solve a problem. You have the answer/solution above but the student has never seen it.
 
 You are helping them with a question/problem and want to help them understand the concepts or figure out solution on their own  with only nudges in the right direction. 
 
-You will be provided with an answer / solution from another tutor but student has not seen it.
-
 First you are going to check whether the question is a factual question and warrants direct answers, for example, like ‘Who built Taj Mahal?’ or if it is a complicated problem / concept that requires further nudging and probing. For simple factual questions, provide direct answers. 
 
-Otherwise, based on the answer / solution, use the socratic method to guide the student towards it. Provide hints or prompt the student to think of the next step.  
+Otherwise, if the student wants to learn about a new concept: use the solution/concept to provide the necessary context. Then, based on that, ask the student a question that requires them to apply the concept and enhance their understanding.
 
-You can use the answer / solution to guide the student to the answer in a Socratic manner without directly giving it away. You can also ask the student a question that requires them to apply the concept and enhance their understanding.
+If the question is a problem to solve: based on the solution to the question, use the socratic method to guide the student towards the answer. Provide hints or prompt the student to think of the next step. 
 
 Your guidance and reasoning should be lucid and easy to understand. Do not overwhelm the student with a lot of questions at a time. 
 
-Use simple analogies and examples to guide the student. Your core expertise is data structures and algorithms. Where it suits, take an algorithm based or a code-first approach to guide the student. Put any math syntax between $ signs.
+Use simple analogies to guide the student. Where suits, take a code-first approach to choose examples or provide explanation.
 
 If the student seems to be really struggling with a concept, provide a larger hint. 
 
-Now you are given the answer / response from another tutor (the student has not seen this), and if available, a summary of your conversation with the student, followed by the most recent dialogue between you and the student.
+Now you are given a response from another agent you can use for reference if needed (the student has not seen this), and if available, a summary of the conversation, followed by the most recent dialogue between you and the learner.
 
-You need to be a Socratic guide. Be concise and empathetic. Understand when you should give more inputs to the answer and when to probe the student based on your recent dialogue and conversation summary.
+You don't have to reiterate all the points from the reference response again - you're a Socratic guide. Be concise and empathetic. Understand when the student is getting frustrated and when to stop probing and directly give the answer. 
 
-Response from another tutor: \n
-
-"""
+Response from another agent: """
 
 def socratic(state: State):
     messages = [SystemMessage(socratic_prompt + state["context"])]
+    #messages+= [HumanMessage(content=state["context"])]
     summary = state.get("summary", "")
     if summary:
-        summary_message = f"\n Above is the original question and response. \n Summary of the conversation that followed: {summary} \n Recent conversation: \n"
-        
-        messages += state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES] + [HumanMessage(content=summary_message)] + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
-        
-    else:
+        summary_message = f" \n Summary of previous conversation: {summary} \n Recent conversation: \n"
+        try:
+            messages += state["messages"][-10:] + [HumanMessage(content=summary_message)]
+        except:
+            try:
+                messages += state["messages"]
+            except:
+                messages = state["messages"]
+    try: 
         messages += state["messages"]
+    except:
+        messages = state["messages"]
     
     response = llm.invoke(messages)
     return {"messages": response} 
@@ -245,14 +153,20 @@ def summarize_conversation(state: State):
             f"This is the summary of the conversation to date: {summary}\n\n"
             "Be concise and extend the summary by taking into account the new messages above. Make a note of any observations on learner reactions and understanding as well:"
         )
-        messages = state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:] + [HumanMessage(content=summary_message)]
     else:
         summary_message = "Create a summary of the conversation above. Make a note of any observations on learner reactions and understanding as well:"
+    
+    try:
+        messages = state["messages"][-10:] + [HumanMessage(content=summary_message)]
+    except:
         messages = state["messages"]
     
     response = llm.invoke(messages)
 
-    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:-KEEP_FIRST_AND_LAST_MESSAGES]]
+    if len(messages) >=22:
+        delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][10, 11]]
+    else:
+        delete_messages = []
 
     return {"summary": response.content, "messages": delete_messages}
 
@@ -261,10 +175,29 @@ def should_summarize(state: State):
     """Return whether to summarize depending on length of messages"""
     messages = state["messages"]
     
-    if len(messages) > SUMMARIZE_AFTER_MESSAGES:
+    if len(messages) > 20:
         return "summarize"
     return END
 
+
+# Retriever
+def get_vector_store():
+    QDRANT_URL=os.environ.get("QDRANT_URL")
+    QDRANT_API_KEY=os.environ.get("QDRANT_API_KEY")
+    vectorstore = QdrantVectorStore.from_existing_collection(
+        collection_name="dsa_notes",
+        embedding=embeddings,
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
+    )
+    return vectorstore
+
+vectorstore = get_vector_store()
+notes_retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+
+def retriever(state: State):
+    additional_context = notes_retriever.invoke(state['context'])
+    return {'context': state['context'] + '-----------------------'.join(x.page_content for x in additional_context)}
 
 # Safety checker
 llm_guard = ChatGroq(model="llama-guard-3-8b")
@@ -285,14 +218,55 @@ def safety_checker(state: State):
 
 def safety_router(state: State):
     if state["safe"]:
-        return "solver"
+        return "context_check"
     else:
-        return END    
+        return END
+    
+# Context Checker
+class CheckContext(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Is the context enough to provide a response to the student's query? 'yes' or 'no'"
+    )
+
+llm_router = llm.with_structured_output(CheckContext)
+
+system_router = """
+You are a reasoning agent checking if the provided context is enough to answer a student's
+query. The query can be a question: if so you must check if the context is enough to
+answer the question. The query can also be a student's attempt at answering or taking the
+next step in answering a question: if so, you must check if the context is enough to
+check the student's response for correctness and be able to guide them towards the right
+path. Give a binary score 'yes' or 'no' to indicate whether the context is enough 
+for the task. If responding to either type of query requires more information or checking new code
+not present in the context, score 'no'.
+"""
+
+prompt_router = ChatPromptTemplate.from_messages(
+    [
+        ('system', system_router),
+        ('human', "Context: \n\n {context} \n\n Student query: {query}"),
+    ]
+)
+
+router = prompt_router | llm_router
+
+def context_check(state: State):
+    if state.get("context", ""):
+        return {"enough_context": 'yes'==router.invoke({'context': state["context"], 'query': state['messages'][-1]})}
+    else:
+        return {"enough_context": False}
+
+def context_router(state: State):
+    if state['enough_context']:
+        return "socratic"
+    else:
+        return "solver"
+    
 
 # Graph     
 llm_graph = llm.with_structured_output(KnowledgeGraph)
 
-graph_prompt = """Create a knowledge graph to help the student understand the concepts you are discussing and have discussed so far. Illustrate examples and analogies used in the discussion if it helps with better understanding for the student."""
+graph_prompt = """Create a knowledge graph to help the student understand the concepts you are discussing and have discussed so far."""
 #Do not call the old graph if it exists, always create a new one.
 
 def create_graph(state: State):
@@ -321,17 +295,24 @@ def create_graph(state: State):
     return {"graph": response}
 
 workflow = StateGraph(State)
-workflow.add_node("safety", safety_checker)
+#workflow.add_node("safety", safety_checker)
+#workflow.add_node("context_check", context_check)
 workflow.add_node("solver", simple_solver)
+#workflow.add_node("retriever", retriever)
 workflow.add_node("socratic", socratic)
 workflow.add_node("graph_creator", create_graph)
 workflow.add_node("summarize", summarize_conversation)
 # workflow.add_node("interrupt", give_answer)
 
-workflow.add_edge(START, "safety")
-workflow.add_conditional_edges("safety", safety_router, {"solver": "solver", END: END})
+workflow.add_edge(START, "solver")
+#workflow.add_conditional_edges("safety", safety_router, {"context_check": "context_check", END: END})
+#workflow.add_conditional_edges("context_check", context_router, {"socratic": "socratic", "solver": "solver"})
+#workflow.add_edge("solver", "retriever")
+#workflow.add_edge("retriever", "socratic")
 workflow.add_edge("solver", "socratic")
 workflow.add_edge("socratic", "graph_creator")
+# workflow.add_edge("solver", "interrupt")
+# workflow.add_conditional_edges("interrupt", route_to_answer, {"summarize": "summarize", "socratic": "socratic"})
 workflow.add_conditional_edges("graph_creator", should_summarize, {"summarize": "summarize", END: END})
 workflow.add_edge("summarize", END)
 
