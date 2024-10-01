@@ -161,7 +161,7 @@ async def draw_message(message: AsyncGenerator):
             streaming_placeholder.markdown(streaming_content)
         
         if not streaming_content:
-            safety_message = "Sorry, I can't answer that."
+            safety_message = "Sorry, there was a problem."
             streaming_content = safety_message
             streaming_placeholder.markdown(safety_message)
             
