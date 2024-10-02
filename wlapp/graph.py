@@ -1,7 +1,6 @@
 import os
 import asyncio
 from dotenv import load_dotenv
-from typing import Literal
 
 from groq import BadRequestError
 from pydantic import BaseModel, Field, ValidationError
@@ -64,9 +63,9 @@ class State(MessagesState):
     safe: bool = True
     graph: KnowledgeGraph
 
-simple_solver_prompt = """You are a helpful tutor in conversation with a student. You're helping with answering / solving a student's question / problem. Your core expertise is data structures and algorithms, but the student can ask questions unrelated to this as well. The questions asked can be about definitions, help with debugging code or hard leetcode style problems to solve. 
+simple_solver_prompt = """You are a helpful tutor in conversation with a student. You're helping with answering / solving a student's question / problem. Your core expertise is data structures and algorithms. The questions asked can be about definitions, help with debugging code or hard leetcode style problems to solve. 
 
-Think carefully before answering any question. Explain your response / reasoning in a concise, lucid manner with simple analogies where possible, in a socratic manner.
+Think carefully before answering any question. Explain your response / reasoning in a concise, lucid manner with all the relevant technical details like code, equations, specifications.
 
 Do not hallucinate. Do not make up facts. If you don't know how to answer a problem, just say so.
 
@@ -130,7 +129,7 @@ You can also ask the student a question that requires them to apply the concept 
 
 Your guidance and reasoning should be lucid and easy to understand. Do not overwhelm the student with a lot of questions at a time.
 
-Use a simple analogy or example to initially frame the problem. Your core expertise is data structures and algorithms. So quickly switch from the analogy to an algorithm based and a code-first approach to guide the student. Be precise and explain any relevant equations too if they are central to a concept/problem. Put any math syntax between $ signs.
+Use a simple analogy or example to initially frame the problem where appropriate. Your core expertise is data structures and algorithms. So quickly switch from the analogy to an algorithm based and a code-first approach to guide the student. Be precise and explain any relevant equations too if they are central to a concept/problem. Remember to put any math syntax and equations between $ signs for proper formatting for the student.
 
 If the student seems to be really struggling with a concept, provide a larger hint.
 
