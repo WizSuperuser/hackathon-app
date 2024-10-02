@@ -1,3 +1,5 @@
+# Import required libraries
+
 import os
 import asyncio
 from dotenv import load_dotenv
@@ -13,9 +15,12 @@ from langgraph.checkpoint.memory import MemorySaver
 import vertexai
 from graphviz import Digraph
 
+# Define once in how many message exchanges to summarize conversation
 SUMMARIZE_AFTER_MESSAGES = 8
+# Define how many starting and recent messages to retain for context
 KEEP_FIRST_AND_LAST_MESSAGES = 2
 
+# Set lln parameters through Groq and vertexai
 load_dotenv()
 llm = ChatGroq(model="llama-3.2-90b-text-preview")
 vertexai.init(
@@ -26,7 +31,7 @@ embeddings = VertexAIEmbeddings(model_name=os.environ.get("VERTEX_MODEL_ID"),
                                 location=os.environ.get("VERTEX_PROJECT_LOCATION"), 
                                 project=os.environ.get("VERTEX_PROJECT_ID")
                                 )
-
+# Define classes used for langgraph
 class Node(BaseModel):
     id: int
     label: str
@@ -37,7 +42,8 @@ class Edge(BaseModel):
     target: int
     label: str
     color: str = "black"
-    
+
+# Define classes used for mind map generation in langgraph
 class KnowledgeGraph(BaseModel):
     nodes: list[Node] = Field(..., default_factory=list, description="List of nodes in the graph")
     edges: list[Edge] = Field(..., default_factory=list, description="List of edges in the graph")
@@ -56,12 +62,38 @@ class KnowledgeGraph(BaseModel):
         # Return graph
         return dot
 
+# Define State class for messages
 class State(MessagesState):
     summary: str
     context: str
     enough_context: bool = False
     safe: bool = True
     graph: KnowledgeGraph
+
+# Safety checker
+llm_guard = ChatGroq(model="llama-guard-3-8b")
+
+guard_prompt = ChatPromptTemplate.from_messages([
+    ("user", "{query}"),
+])
+
+guard = guard_prompt | llm_guard
+
+def safety_checker(state: State):
+    message = state["messages"][-1]
+    if 'safe' == guard.invoke({"query": message}).content:
+        return {"safe": True}
+    else:
+        delete_message = [RemoveMessage(id=message.id)]
+        return {"safe": False, "messages": delete_message} 
+
+def safety_router(state: State):
+    if state["safe"]:
+        return "solver"
+    else:
+        return END    
+
+# Agent 1 - Solver prompt
 
 simple_solver_prompt = """You are a helpful tutor in conversation with a student. You're helping with answering / solving a student's question / problem. Your core expertise is data structures and algorithms. The questions asked can be about definitions, help with debugging code or hard leetcode style problems to solve. 
 
@@ -72,6 +104,8 @@ Answer in a way meant to guide the student using a socratic approach.
 Do not hallucinate. Do not make up facts. If you don't know how to answer a problem, just say so.
 
 Be concise."""
+
+# Agent 1 - Solver function
 
 def simple_solver(state: State):
     
@@ -89,32 +123,33 @@ def simple_solver(state: State):
     return {"context": response.content}
 
 
-socratic_prompt2 = """You are an empathetic Socratic tutor in conversation to help a student gain a very strong understanding of a concept or solve a problem.
+#socratic_prompt2 = """You are an empathetic Socratic tutor in conversation to help a student gain a very strong understanding of a concept or solve a problem.
 
-You are helping them with a question/problem and want to help them understand the concepts or figure out solution on their own  with only nudges in the right direction. 
+#You are helping them with a question/problem and want to help them understand the concepts or figure out solution on their own  with only nudges in the right direction. 
 
-You will be provided with an answer / solution from another tutor but student has not seen it.
+#You will be provided with an answer / solution from another tutor but student has not seen it.
 
-First you are going to check whether the question is a factual question and warrants direct answers, for example, like ‘Who built Taj Mahal?’ or if it is a complicated problem / concept that requires further nudging and probing. For simple factual questions, provide direct answers. 
+#First you are going to check whether the question is a factual question and warrants direct answers, for example, like ‘Who built Taj Mahal?’ or if it is a complicated problem / concept that requires further nudging and probing. For simple factual questions, provide direct answers. 
 
-Otherwise, based on the answer / solution, use the socratic method to guide the student towards it. Provide hints or prompt the student to think of the next step.  
+#Otherwise, based on the answer / solution, use the socratic method to guide the student towards it. Provide hints or prompt the student to think of the next step.  
 
-You can use the answer / solution to guide the student to the answer in a Socratic manner without directly giving it away. You can also ask the student a question that requires them to apply the concept and enhance their understanding.
+#You can use the answer / solution to guide the student to the answer in a Socratic manner without directly giving it away. You can also ask the student a question that requires them to apply the concept and enhance their understanding.
 
-Your guidance and reasoning should be lucid and easy to understand. Do not overwhelm the student with a lot of questions at a time. 
+#Your guidance and reasoning should be lucid and easy to understand. Do not overwhelm the student with a lot of questions at a time. 
 
-Use simple analogies and examples to guide the student. Your core expertise is data structures and algorithms. Where it is suitable, take an algorithm based or a code-first approach to guide the student. Put any math syntax between $ signs.
+#Use simple analogies and examples to guide the student. Your core expertise is data structures and algorithms. Where it is suitable, take an algorithm based or a code-first approach to guide the student. Put any math syntax between $ signs.
 
-If the student seems to be really struggling with a concept, provide a larger hint. 
+#If the student seems to be really struggling with a concept, provide a larger hint. 
 
-Now you are given the answer / response from another tutor (the student has not seen this), and if available, a summary of your conversation with the student, followed by the most recent dialogue between you and the student.
+#Now you are given the answer / response from another tutor (the student has not seen this), and if available, a summary of your conversation with the student, followed by the most recent dialogue between you and the student.
 
-You need to be a Socratic guide. Be concise and empathetic. Understand when you should give more inputs to the answer and when to probe the student based on your recent dialogue and conversation summary.
+#You need to be a Socratic guide. Be concise and empathetic. Understand when you should give more inputs to the answer and when to probe the student based on your recent dialogue and conversation summary.
 
-Response from another tutor: \n
+#Response from another tutor: \n
 
-"""
+#"""
 
+# Agent 2 - Socratic prompt
 socratic_prompt = """You are a motivated tutor in conversation to help a student gain a strong understanding of a concept or solve a problem.
 
 You are helping them with a question/problem and want to help them understand the concepts or figure out solution on their own  with only nudges in the right direction.
@@ -144,8 +179,7 @@ Now you are given the answer / response from another tutor (the student has not 
 Response from another tutor: \n
 """
 
-
-
+# Agent 2 - Socratic function
 
 def socratic(state: State):
     messages = [SystemMessage(socratic_prompt + state["context"])]
@@ -162,6 +196,7 @@ def socratic(state: State):
     return {"messages": response} 
 
 
+# Agent 3 - Summarize conversation
 def summarize_conversation(state: State):
     summary = state.get("summary", "")
     
@@ -181,7 +216,7 @@ def summarize_conversation(state: State):
 
     return {"summary": response.content, "messages": delete_messages}
 
-
+# Check if enough passes happened to summarize
 def should_summarize(state: State):
     """Return whether to summarize depending on length of messages"""
     messages = state["messages"]
@@ -190,29 +225,6 @@ def should_summarize(state: State):
         return "summarize"
     return END
 
-
-# Safety checker
-llm_guard = ChatGroq(model="llama-guard-3-8b")
-
-guard_prompt = ChatPromptTemplate.from_messages([
-    ("user", "{query}"),
-])
-
-guard = guard_prompt | llm_guard
-
-def safety_checker(state: State):
-    message = state["messages"][-1]
-    if 'safe' == guard.invoke({"query": message}).content:
-        return {"safe": True}
-    else:
-        delete_message = [RemoveMessage(id=message.id)]
-        return {"safe": False, "messages": delete_message} 
-
-def safety_router(state: State):
-    if state["safe"]:
-        return "solver"
-    else:
-        return END    
 
 # Graph     
 llm_graph = llm.with_structured_output(KnowledgeGraph)
@@ -245,6 +257,7 @@ def create_graph(state: State):
     
     return {"graph": response}
 
+# Define langgraph nodes
 workflow = StateGraph(State)
 workflow.add_node("safety", safety_checker)
 workflow.add_node("solver", simple_solver)
@@ -253,6 +266,7 @@ workflow.add_node("graph_creator", create_graph)
 workflow.add_node("summarize", summarize_conversation)
 # workflow.add_node("interrupt", give_answer)
 
+# Define langgraph edges
 workflow.add_edge(START, "safety")
 workflow.add_conditional_edges("safety", safety_router, {"solver": "solver", END: END})
 workflow.add_edge("solver", "socratic")
@@ -263,6 +277,7 @@ workflow.add_edge("summarize", END)
 memory = MemorySaver()
 graph = workflow.compile(checkpointer=memory)
 
+# Function to render agent response to user
 async def stream_graph(message, thread_id):
     config = {"configurable": {"thread_id": str(thread_id)}}
     input_message = HumanMessage(content=message)
@@ -270,13 +285,14 @@ async def stream_graph(message, thread_id):
         if event["event"] == "on_chat_model_stream" and event['metadata'].get('langgraph_node','') == "socratic":
             data = event["data"]
             yield data["chunk"].content
-        
+
+# Check if previous graph exists for reference
 def draw_graph(thread_id):
     config = {"configurable": {"thread_id": str(thread_id)}} 
     if knowledge_graph := graph.get_state(config).values.get("graph", ""):
         return knowledge_graph.return_graph()
             
-
+# Function to take query inputs
 async def text_stream(query_text, thread_id):
     async for c in stream_graph(query_text, thread_id):
         print(c, end = "", flush=True)
