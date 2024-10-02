@@ -26,7 +26,8 @@ async def main():
     with st.sidebar:
         
         st.header(f"{APP_TITLE}")
-        "Learn Data Structures and Algorithms using the Socratic method."
+        st.write("*Curiosity is the Key. Let us be the Guide.*")
+        st.write("Learn Data Structures and Algorithms using the Socratic method. Ask a question and let the agent guide you to a robust understanding by letting you think the interesting parts for yourselves. Take a look at our sample questions to find some of the kinds of questions you can ask.")
         
         # Sample Questions
         option = st.selectbox(
@@ -34,6 +35,35 @@ async def main():
             (
                 "What is quicksort?",
                 "What are b-trees?",
+                "What is Q learning?",
+                "Help me solve this problem: Given an array of strings strs, group the anagrams together. You can return the answer in any order.",
+                """Debug this code: def longest_arithmetic_subsequence(arr):
+    if not arr:
+        return []
+
+    longest_subseq = []
+    temp_subseq = [arr[0]]
+    diff = arr[1] - arr[0]
+
+    for i in range(1, len(arr)):
+        current_diff = arr[i] - arr[i-1]
+        
+        if current_diff == diff:
+            temp_subseq.append(arr[i])
+        else:
+            if len(temp_subseq) > len(longest_subseq):
+                longest_subseq = temp_subseq
+            temp_subseq = [arr[i-1], arr[i]]
+            diff = current_diff
+
+    if len(temp_subseq) > len(longest_subseq):
+        longest_subseq = temp_subseq
+
+    return longest_subseq
+""",
+                "How do I build a website?",
+                "Give me a coding problem to solve about machine learning",
+                "What can I make using my knowledge of quicksort?",
             ),
             index=None,
             placeholder="What do I ask?",
