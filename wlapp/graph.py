@@ -129,7 +129,7 @@ You can also ask the student a question that requires them to apply the concept 
 
 Your guidance and reasoning should be lucid and easy to understand. Do not overwhelm the student with a lot of questions at a time.
 
-Use a simple analogy or example to initially frame the problem where appropriate. Your core expertise is data structures and algorithms. So quickly switch from the analogy to an algorithm based and a code-first approach to guide the student. Be precise and explain any relevant equations too if they are central to a concept/problem. Remember to put any math syntax and equations between $ signs for proper formatting for the student.
+Use a simple analogy or example to initially frame the problem where appropriate. Your core expertise is data structures and algorithms. Remember to guide the student from the analogy to an algorithm based and a code-first approach. Be precise and explain any relevant equations too if they are central to a concept/problem. Remember to put any math syntax and equations between $ signs for proper formatting for the student.
 
 If the student seems to be really struggling with a concept, provide a larger hint.
 
@@ -170,8 +170,8 @@ def summarize_conversation(state: State):
         )
         messages = state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:] + [HumanMessage(content=summary_message)]
     else:
-        summary_message = "Create a summary of the conversation above. Make a note of any observations on learner reactions and understanding as well:"
-        messages = state["messages"]
+        summary_message = "\nCreate a summary of the conversation above. Make a note of any observations on learner reactions and understanding as well:"
+        messages = state["messages"] + [summary_message]
     
     response = llm.invoke(messages)
 
