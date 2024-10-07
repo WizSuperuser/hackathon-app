@@ -37,7 +37,7 @@ on:
 env:
   PROJECT_ID: 'genai-exchange-hackathon' # TODO: update to your Google Cloud project ID
   REGION: 'asia-south1' # TODO: update to your region
-  # SERVICE: 'my-service' # TODO: update to your service name
+  SERVICE: 'wlapp' # TODO: update to your service name
   WORKLOAD_IDENTITY_PROVIDER: 'projects/595709402006/locations/global/workloadIdentityPools/github/providers/my-repo' # TODO: update to your workload identity provider
 
 jobs:
