@@ -29,10 +29,10 @@
 
 name: 'Build and Deploy to Cloud Run'
 
-on:
-  push:
-    branches:
-      - '"main"'
+on: workflow_dispatch
+  # push:
+  #   branches:
+  #     - '"main"'
 
 env:
   PROJECT_ID: 'genai-exchange-hackathon' # TODO: update to your Google Cloud project ID
