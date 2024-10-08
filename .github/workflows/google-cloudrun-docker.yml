@@ -78,6 +78,7 @@ jobs:
         run: |-
           DOCKER_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/app/${{ env.SERVICE }}:${{ github.sha }}"
           docker build --tag "${DOCKER_TAG}" .
+          docker image ls
           docker push "${DOCKER_TAG}"
       - name: 'Deploy to Cloud Run'
         id: 'deploy'
