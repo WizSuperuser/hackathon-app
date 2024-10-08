@@ -12,3 +12,4 @@ COPY wizlearnr_logo.png .
 EXPOSE 8501
 
 CMD ["streamlit", "run", "streamlit-app.py"]
+
