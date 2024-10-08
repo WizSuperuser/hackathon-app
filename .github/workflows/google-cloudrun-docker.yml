@@ -39,6 +39,7 @@ env:
   REGION: 'asia-south1' # TODO: update to your region
   SERVICE: 'wlapp' # TODO: update to your service name
   WORKLOAD_IDENTITY_PROVIDER: 'projects/595709402006/locations/global/workloadIdentityPools/github/providers/my-repo' # TODO: update to your workload identity provider
+  SERVICE_ACCOUNT: 'wlapp-registry-writer@genai-exchange-hackathon.iam.gserviceaccount.com'
 
 jobs:
   deploy:
@@ -61,6 +62,7 @@ jobs:
         uses: 'google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2' # google-github-actions/auth@v2
         with:
           workload_identity_provider: '${{ env.WORKLOAD_IDENTITY_PROVIDER }}'
+          service_account: '${{ env.SERVICE_ACCOUNT }}'
 
       # BEGIN - Docker auth and build
       #
