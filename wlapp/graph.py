@@ -89,7 +89,7 @@ class State(MessagesState):
 
 
 # Safety checker
-llm_guard = ChatGroq(model="llama-guard-4-12b")
+llm_guard = ChatGroq(model="meta-llama/llama-guard-4-12b")
 
 guard_prompt = ChatPromptTemplate.from_messages(
     [
