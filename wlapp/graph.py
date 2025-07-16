@@ -8,7 +8,12 @@ from groq import BadRequestError
 from pydantic import BaseModel, Field, ValidationError
 from langchain_groq import ChatGroq
 from langchain_google_vertexai import VertexAIEmbeddings
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage, AIMessage
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
+    RemoveMessage,
+    AIMessage,
+)
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -22,20 +27,24 @@ KEEP_FIRST_AND_LAST_MESSAGES = 2
 
 # Set lln parameters through Groq and vertexai
 load_dotenv()
-llm = ChatGroq(model="llama-3.2-90b-text-preview")
+llm = ChatGroq(model="llama-3.3-70b-versatile")
 vertexai.init(
-        project=os.environ.get("VERTEX_PROJECT_ID"),
-        location=os.environ.get("VERTEX_PROJECT_LOCATION")
-        )
-embeddings = VertexAIEmbeddings(model_name=os.environ.get("VERTEX_MODEL_ID"), 
-                                location=os.environ.get("VERTEX_PROJECT_LOCATION"), 
-                                project=os.environ.get("VERTEX_PROJECT_ID")
-                                )
+    project=os.environ.get("VERTEX_PROJECT_ID"),
+    location=os.environ.get("VERTEX_PROJECT_LOCATION"),
+)
+embeddings = VertexAIEmbeddings(
+    model_name=os.environ.get("VERTEX_MODEL_ID"),
+    location=os.environ.get("VERTEX_PROJECT_LOCATION"),
+    project=os.environ.get("VERTEX_PROJECT_ID"),
+)
+
+
 # Define classes used for langgraph
 class Node(BaseModel):
     id: int
     label: str
     color: str
+
 
 class Edge(BaseModel):
     source: int
@@ -43,24 +52,32 @@ class Edge(BaseModel):
     label: str
     color: str = "black"
 
+
 # Define classes used for mind map generation in langgraph
 class KnowledgeGraph(BaseModel):
-    nodes: list[Node] = Field(..., default_factory=list, description="List of nodes in the graph")
-    edges: list[Edge] = Field(..., default_factory=list, description="List of edges in the graph")
-    
+    nodes: list[Node] = Field(
+        ..., default_factory=list, description="List of nodes in the graph"
+    )
+    edges: list[Edge] = Field(
+        ..., default_factory=list, description="List of edges in the graph"
+    )
+
     def return_graph(self):
         dot = Digraph(comment="Knowledge Graph")
-        
+
         # Add nodes
         for node in self.nodes:
             dot.node(str(node.id), node.label, color=node.color)
-            
+
         # Add edges
         for edge in self.edges:
-            dot.edge(str(edge.source), str(edge.target), label=edge.label, color=edge.color)
-        
+            dot.edge(
+                str(edge.source), str(edge.target), label=edge.label, color=edge.color
+            )
+
         # Return graph
         return dot
+
 
 # Define State class for messages
 class State(MessagesState):
@@ -70,28 +87,34 @@ class State(MessagesState):
     safe: bool = True
     graph: KnowledgeGraph
 
-# Safety checker
-llm_guard = ChatGroq(model="llama-guard-3-8b")
 
-guard_prompt = ChatPromptTemplate.from_messages([
-    ("user", "{query}"),
-])
+# Safety checker
+llm_guard = ChatGroq(model="llama-guard-4-12b")
+
+guard_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("user", "{query}"),
+    ]
+)
 
 guard = guard_prompt | llm_guard
 
+
 def safety_checker(state: State):
     message = state["messages"][-1]
-    if 'safe' == guard.invoke({"query": message}).content:
+    if "safe" == guard.invoke({"query": message}).content:
         return {"safe": True}
     else:
         delete_message = [RemoveMessage(id=message.id)]
-        return {"safe": False, "messages": delete_message} 
+        return {"safe": False, "messages": delete_message}
+
 
 def safety_router(state: State):
     if state["safe"]:
         return "solver"
     else:
-        return END    
+        return END
+
 
 # Agent 1 - Solver prompt
 
@@ -107,20 +130,25 @@ Be concise."""
 
 # Agent 1 - Solver function
 
+
 def simple_solver(state: State):
-    
     messages = [SystemMessage(content=simple_solver_prompt)]
     # get summary if it exists
     summary = state.get("summary", "")
     # if there is summary, we add it to prompt
     if summary:
         summary_message = f"\n Above is the original question and response. \n Summary of the conversation that followed: {summary} \n Recent conversation: \n"
-        messages += state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES] + [HumanMessage(content=summary_message)] + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
+        messages += (
+            state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES]
+            + [HumanMessage(content=summary_message)]
+            + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
+        )
     else:
         messages += state["messages"]
     response = llm.invoke(messages)
 
     return {"context": response.content}
+
 
 # Agent 2 - Socratic prompt
 socratic_prompt = """You are an empathetic Socratic tutor in conversation to help a student gain a very strong understanding of a concept or solve a problem.
@@ -181,81 +209,100 @@ socratic_prompt = """You are an empathetic Socratic tutor in conversation to hel
 
 # Agent 2 - Socratic function
 
+
 def socratic(state: State):
     messages = [SystemMessage(socratic_prompt + state["context"])]
     summary = state.get("summary", "")
     if summary:
         summary_message = f"\n Above is the original question and response. \n Summary of the conversation that followed: {summary} \n Recent conversation: \n"
-        
-        messages += state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES] + [HumanMessage(content=summary_message)] + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
-        
+
+        messages += (
+            state["messages"][:KEEP_FIRST_AND_LAST_MESSAGES]
+            + [HumanMessage(content=summary_message)]
+            + state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:]
+        )
+
     else:
         messages += state["messages"]
-    
+
     response = llm.invoke(messages)
-    return {"messages": response} 
+    return {"messages": response}
 
 
 # Agent 3 - Summarize conversation
 def summarize_conversation(state: State):
     summary = state.get("summary", "")
-    
+
     if summary:
         summary_message = (
             f"This is the summary of the conversation to date: {summary}\n\n"
             "Be concise and extend the summary by taking into account the new messages above. Make a note of any observations on learner reactions and understanding as well:"
         )
-        messages = state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:] + [HumanMessage(content=summary_message)]
+        messages = state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:] + [
+            HumanMessage(content=summary_message)
+        ]
     else:
         summary_message = "\nCreate a summary of the conversation above. Make a note of any observations on learner reactions and understanding as well:"
         messages = state["messages"] + [summary_message]
-    
+
     response = llm.invoke(messages)
 
-    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][KEEP_FIRST_AND_LAST_MESSAGES:-KEEP_FIRST_AND_LAST_MESSAGES]]
+    delete_messages = [
+        RemoveMessage(id=m.id)
+        for m in state["messages"][
+            KEEP_FIRST_AND_LAST_MESSAGES:-KEEP_FIRST_AND_LAST_MESSAGES
+        ]
+    ]
 
     return {"summary": response.content, "messages": delete_messages}
+
 
 # Check if enough passes happened to summarize
 def should_summarize(state: State):
     """Return whether to summarize depending on length of messages"""
     messages = state["messages"]
-    
+
     if len(messages) > SUMMARIZE_AFTER_MESSAGES:
         return "summarize"
     return END
 
 
-# Graph     
+# Graph
 llm_graph = llm.with_structured_output(KnowledgeGraph)
 
 graph_prompt = """Create a knowledge graph to help the student understand the concepts you are discussing and have discussed so far. Illustrate examples and analogies used in the discussion if it helps with better understanding for the student."""
-#Do not call the old graph if it exists, always create a new one.
+# Do not call the old graph if it exists, always create a new one.
+
 
 def create_graph(state: State):
     messages = [SystemMessage(content=graph_prompt)]
     graph = state.get("graph", "")
     if graph:
-        graph_message = f"Knowledge graph of your conversation with the student: {str(graph)}\n You can use this graph as a reference if needed but you don't have to stick to the exact template" #but cannot call it!"
+        graph_message = f"Knowledge graph of your conversation with the student: {str(graph)}\n You can use this graph as a reference if needed but you don't have to stick to the exact template"  # but cannot call it!"
         messages += [HumanMessage(content=graph_message)]
     summary = state.get("summary", "")
     if summary:
         summary_message = f"Summary of your conversation with the student: {summary}"
         messages += [HumanMessage(content=summary_message)]
-    
+
     try:
-        messages += [message for message in state["messages"][-3:] if type(message)==AIMessage]
+        messages += [
+            message for message in state["messages"][-3:] if type(message) == AIMessage
+        ]
     except:
-        messages += [message for message in state["messages"] if type(message)==AIMessage]
-    
+        messages += [
+            message for message in state["messages"] if type(message) == AIMessage
+        ]
+
     try:
         response = llm_graph.invoke(messages)
     except BadRequestError:
         response = state.get("graph") if state.get("graph", "") else KnowledgeGraph()
     except ValidationError:
-        response = state.get("graph") if state.get("graph", "") else KnowledgeGraph() 
-    
+        response = state.get("graph") if state.get("graph", "") else KnowledgeGraph()
+
     return {"graph": response}
+
 
 # Define langgraph nodes
 workflow = StateGraph(State)
@@ -271,31 +318,42 @@ workflow.add_edge(START, "safety")
 workflow.add_conditional_edges("safety", safety_router, {"solver": "solver", END: END})
 workflow.add_edge("solver", "socratic")
 workflow.add_edge("socratic", "graph_creator")
-workflow.add_conditional_edges("graph_creator", should_summarize, {"summarize": "summarize", END: END})
+workflow.add_conditional_edges(
+    "graph_creator", should_summarize, {"summarize": "summarize", END: END}
+)
 workflow.add_edge("summarize", END)
 
 memory = MemorySaver()
 graph = workflow.compile(checkpointer=memory)
 
+
 # Function to render agent response to user
 async def stream_graph(message, thread_id):
     config = {"configurable": {"thread_id": str(thread_id)}}
     input_message = HumanMessage(content=message)
-    async for event in graph.astream_events({"messages": input_message}, config, version="v2"):
-        if event["event"] == "on_chat_model_stream" and event['metadata'].get('langgraph_node','') == "socratic":
+    async for event in graph.astream_events(
+        {"messages": input_message}, config, version="v2"
+    ):
+        if (
+            event["event"] == "on_chat_model_stream"
+            and event["metadata"].get("langgraph_node", "") == "socratic"
+        ):
             data = event["data"]
             yield data["chunk"].content
 
+
 # Check if previous graph exists for reference
 def draw_graph(thread_id):
-    config = {"configurable": {"thread_id": str(thread_id)}} 
+    config = {"configurable": {"thread_id": str(thread_id)}}
     if knowledge_graph := graph.get_state(config).values.get("graph", ""):
         return knowledge_graph.return_graph()
-            
+
+
 # Function to take query inputs
 async def text_stream(query_text, thread_id):
     async for c in stream_graph(query_text, thread_id):
-        print(c, end = "", flush=True)
-        
-if __name__=="__main__":
+        print(c, end="", flush=True)
+
+
+if __name__ == "__main__":
     asyncio.run(text_stream("what is hashing?", 1))
