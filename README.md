@@ -29,6 +29,16 @@ To run the vertex ai llm, make sure google cloud is authenticated using superuse
 gcloud auth application-default login
 ```
 
+## Deploy steps
+
+```bash
+docker build --platform linux/amd64 -t wlapp:<tag> .
+docker tag wlapp:latest asia-south1-docker.pkg.dev/genai-exchange-hackathon/app/wlapp:<tag>
+docker push asia-south1-docker.pkg.dev/genai-exchange-hackathon/app/wlapp:<tag>
+```
+
+Then create new revision on cloud run and select the new docker image to deploy.
+
 Roadmap:
 - [x] Add safety
 - [x] Add session history
